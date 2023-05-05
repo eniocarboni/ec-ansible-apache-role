@@ -1,0 +1,11 @@
+{% for listen in apache_listens %}
+Listen {{ listen }}
+{% endfor %}
+
+<IfModule ssl_module>
+{% for listen in apache_ssl_listens %}
+        Listen {{ listen }}
+{% endfor %}
+</IfModule>
+
+# vim: syntax=apache ts=4 sw=4 sts=4 sr noet

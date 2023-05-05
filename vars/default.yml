@@ -1,0 +1,6 @@
+---
+apache_server: apache2
+apache_service: "{{ apache_server }}"
+apache_log_dir: "${APACHE_LOG_DIR}"
+apache_virtualhost_def_sslcertificatefile: /etc/ssl/certs/ssl-cert-snakeoil.pem
+apache_virtualhost_def_sslcertificatekeyfile: /etc/ssl/private/ssl-cert-snakeoil.key

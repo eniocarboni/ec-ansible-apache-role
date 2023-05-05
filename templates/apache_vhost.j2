@@ -1,0 +1,51 @@
+<VirtualHost {{ apitem.addr | default('*.80') }} >
+{% if apitem.ServerName is defined and apitem.ServerName %}
+  ServerName {{ apitem.ServerName }}
+{% endif %}
+{% if apitem.ServerAlias is defined %}
+  ServerAlias {{ apitem.ServerAlias }}
+{% endif %}
+{% if apitem.ServerAdmin is defined and apitem.ServerAdmin %}
+  ServerAdmin {{ apitem.ServerAdmin }}
+{% endif %}
+{% if apitem.DocumentRoot is defined and apitem.DocumentRoot %}
+  DocumentRoot {{ apitem.DocumentRoot }}
+{% if apitem.Directory_DocumentRoot_default is not defined or apitem.Directory_DocumentRoot_default | default(true) %}
+  <Directory "{{ apitem.DocumentRoot }}">
+    Options {{ apitem.directory_options | default(apache_virtualhost_def_directory_options) }}
+    AllowOverride {{ apitem. directory_allowoverride | default(apache_virtualhost_def_directory_allowoverride) }}
+  </Directory>
+{% endif %}
+{% endif %}
+{% if apitem.sslengine is defined and apitem.sslengine == 'on' %}
+
+  SSLEngine on
+  SSLProtocol {{ apitem.sslprotocol | default(apache_virtualhost_def_sslprotocol) }}
+  SSLCipherSuite {{ apitem.sslciphersuite | default(apache_virtualhost_def_sslciphersuite) }}
+  SSLHonorCipherOrder {{ apitem.sslhonorcipherorder | default(apache_virtualhost_def_sslhonorcipherorder) }}
+  SSLSessionTickets {{ apitem.sslsessiontickets | default(apache_virtualhost_def_sslsessiontickets) }}
+  SSLOptions {{ apitem.ssloptions | default(apache_virtualhost_def_ssloptions) }}
+  SSLCertificateFile {{ apitem.sslcertificatefile | default(apache_virtualhost_def_sslcertificatefile) }}
+  SSLCertificateKeyFile {{ apitem.sslcertificatekeyfile | default(apache_virtualhost_def_sslcertificatekeyfile) }}
+{% if apitem.sslcertificatechainfile is defined %}
+  SSLCertificateChainFile {{ apitem.sslcertificatechainfile }}
+{% endif %}
+
+{% endif %}
+{% if apitem.ErrorLog is defined and apitem.ErrorLog %}
+  ErrorLog {{ apitem.ErrorLog }}
+{% elif apitem.ServerName is defined and apitem.ServerName %}
+  ErrorLog {{ apache_log_dir }}/{{ apitem.ServerName }}-error_log
+{% endif %}
+{% if apitem.CustomLog is defined and apitem.CustomLog %}
+  CustomLog {{ apitem.CustomLog }}
+{% elif apitem.ServerName is defined and apitem.ServerName %}
+  CustomLog {{ apache_log_dir }}/{{ apitem.ServerName }}-access_log combined
+{% endif %}
+  {{ apitem.Extra | default('') }}
+{% if apitem.add_rewrite_rule_to_ssl is defined and apitem.add_rewrite_rule_to_ssl and apitem.ServerName %}
+  RewriteEngine on
+  RewriteCond %{SERVER_NAME} ={{ apitem.ServerName }}
+  RewriteRule ^ https://%{SERVER_NAME}%{REQUEST_URI} [END,NE,R=permanent]
+{% endif %}
+</VirtualHost>

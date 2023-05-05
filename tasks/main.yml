@@ -1,0 +1,29 @@
+---
+# tasks file for eniocarboni.apache
+- name: "Include vars based on OS Family [{{ ansible_os_family }}]"
+  ansible.builtin.include_vars: "{{ item }}"
+  with_first_found:
+    - "{{ ansible_os_family }}.yml"
+    - "default.yml"
+
+- name: "Update cache"
+  ansible.builtin.include_tasks: "{{ item }}"
+  with_first_found:
+    - "update_cache_{{ ansible_pkg_mgr }}.yml"
+    - update_cache_disabled.yml
+
+- name: "Install Apache httpd Web Server"
+  ansible.builtin.package:
+    name: "{{ apache_server }}"
+    state: present
+- name: "Install extra packages for Web Server"
+  ansible.builtin.package:
+    name: "{{ item }}"
+    state: present
+  loop: "{{ apache_extra_packages | default([]) }}"
+
+- name: "Include task based on Os Family for Apache [{{ ansible_os_family }}]"
+  ansible.builtin.include_tasks: "{{ item }}"
+  with_first_found:
+    - "apache_{{ ansible_os_family }}.yml"
+    - "apache_default.yml"

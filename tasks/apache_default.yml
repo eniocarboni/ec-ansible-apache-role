@@ -1,0 +1,169 @@
+---
+- name: "Test MPM file"
+  ansible.builtin.stat:
+    path: "/etc/apache2/mods-enabled/mpm_{{ apache_mpm }}.load"
+  register: stat_mpm
+- name: "Disable all Multi-Processing Module (MPM)"
+  community.general.apache2_module:
+    name: "{{ apitem }}"
+    state: absent
+    ignore_configcheck: true
+    warn_mpm_absent: false
+  notify: "Restart Web Server"
+  loop:
+    - mpm_event
+    - mpm_worker
+    - mpm_prefork
+  when: not stat_mpm.stat.exists
+  loop_control:
+    loop_var: apitem
+
+- name: "Enable Apache Multi-Processing Module (MPM)"
+  community.general.apache2_module:
+    name: "mpm_{{ apache_mpm }}"
+    state: present
+    warn_mpm_absent: false
+    ignore_configcheck: true
+  notify: "Restart Web Server"
+- name: "Check Apache modules"
+  community.general.apache2_module:
+    name: "{{ apitem.name }}"
+    state: "{{ apitem.state }}"
+  notify: "Restart Web Server"
+  when: not apitem.name.startswith('mpm_')
+  loop: "{{ apache_modules }}"
+  loop_control:
+    loop_var: apitem
+
+- name: "Check default vhost"
+  ansible.builtin.stat:
+    path: "/etc/apache2/sites-enabled/000-default.conf"
+  register: stat_def_vhost
+- name: "Disable default vhost"
+  ansible.builtin.file:
+    path: "/etc/apache2/sites-enabled/000-default.conf"
+    state: absent
+  when: apache_vhost_disable_default|bool and stat_def_vhost.stat.exists | bool
+- name: "Enable default vhost"
+  ansible.builtin.file:
+    src: "/etc/apache2/sites-available/000-default.conf"
+    path: "/etc/apache2/sites-enabled/000-default.conf"
+    state: link
+  when: not apache_vhost_disable_default|bool and not stat_def_vhost.stat.exists | bool
+    
+- name: "Check Apache ports to listen"
+  ansible.builtin.template:
+    src: apache_debian_ports.j2
+    dest: "/etc/apache2/ports.conf"
+    group: root
+    owner: root
+    mode: '0644'   
+  notify: "Restart Web Server"
+
+- name: "Check Apache VirtualHosts"
+  ansible.builtin.template:
+    src: apache_vhost.j2
+    dest: "/etc/apache2/sites-available/090-{{ apitem.ServerName | replace(':', '_') | replace('.', '_') }}{{ apitem.file_suffix | default('') }}.conf"
+    group: root
+    mode: '0644'
+  notify: "Restart Web Server"
+  when: apitem.state == 'present'
+  loop: "{{ apache_virtualhost }}"
+  loop_control:
+    loop_var: apitem
+- name: "Remove Apache VirtualHosts"
+  ansible.builtin.file:
+    dest: "/etc/apache2/sites-available/090-{{ apitem.ServerName | replace(':', '_') | replace('.', '_') }}{{ apitem.file_suffix | default('') }}.conf"
+    state: absent
+  notify: "Restart Web Server"
+  when: apitem.state != 'present'
+  loop: "{{ apache_virtualhost }}"
+  loop_control:
+    loop_var: apitem
+- name: "Remove enabled Apache VirtualHosts"
+  ansible.builtin.file:
+    dest: "/etc/apache2/sites-enabled/090-{{ apitem.ServerName | replace(':', '_') | replace('.', '_') }}{{ apitem.file_suffix | default('') }}.conf"
+    state: absent
+  notify: "Restart Web Server"
+  when: apitem.state != 'present'
+  loop: "{{ apache_virtualhost }}"
+  loop_control:
+    loop_var: apitem
+- name: "Check if vhosts is enabled"
+  ansible.builtin.file:
+    src: "/etc/apache2/sites-available/090-{{ apitem.ServerName | replace(':', '_') | replace('.', '_') }}{{ apitem.file_suffix | default('') }}.conf"
+    path: "/etc/apache2/sites-enabled/090-{{ apitem.ServerName | replace(':', '_') | replace('.', '_') }}{{ apitem.file_suffix | default('') }}.conf"
+    state: link
+  notify: "Restart Web Server"
+  when: apitem.state == 'present'
+  loop: "{{ apache_virtualhost }}"
+  loop_control:
+    loop_var: apitem
+
+- name: "Check Apache ServerTokens"
+  ansible.builtin.lineinfile:
+    path: "/etc/apache2/conf-available/security.conf"
+    regexp: '^ServerTokens '
+    line: "ServerTokens {{ apache_servertokens | default('Prod') }}"
+  notify: "Restart Web Server"
+
+- name: "Check Apache ServerSignature"
+  ansible.builtin.lineinfile:
+    path: "/etc/apache2/conf-available/security.conf"
+    regexp: '^ServerSignature '
+    line: "ServerSignature {{ apache_serversignature | default('Off') }}"
+  notify: "Restart Web Server"
+
+- name: "Install Ufw firewall package"
+  ansible.builtin.package: 
+    name: ufw
+    state: latest # noqa package-latest
+  when: firewall | bool and firewall_force_install | bool
+- name: "Check if ipv6 is disables"
+  ansible.builtin.command: sysctl -e -n net.ipv6.conf.all.disable_ipv6
+  register: ipv6_status
+  changed_when: false
+  when: firewall | bool and firewall_force_install | bool
+- name: "Enable ipv6 for ufw"
+  ansible.builtin.lineinfile:
+    path: /etc/default/ufw
+    state: present
+    regexp: '^IPV6='
+    line: 'IPV6=yes'
+  when: firewall | bool and firewall_force_install | bool and ipv6_status.stdout == '0'
+- name: "Disable ipv6 for ufw"
+  ansible.builtin.lineinfile:
+    path: /etc/default/ufw
+    state: present
+    regexp: '^IPV6='
+    line: 'IPV6=no'
+  when: firewall | bool and firewall_force_install | bool and ipv6_status.stdout == '1'
+- name: "Enable ufw firewall"
+  ansible.builtin.service:
+    name: ufw
+    state: started
+    enabled: yes
+  when: firewall | bool and firewall_force_install | bool
+- name: "Deny everything and enable UFW"
+  community.general.ufw:
+    state: enabled
+    default: deny
+  when: firewall | bool and firewall_force_install | bool
+- name: "Check UFW Firewall"
+  ansible.builtin.command: "ufw status"
+  register: ap_uwf_status
+  when: firewall | bool
+  failed_when: false
+  changed_when: false
+- name: "Open UFW Firewall port for Apache Server"
+  community.general.ufw:
+    rule: allow
+    port: "{{ apitem.port }}"
+    proto: "{{ apitem.proto | default('tcp') }}"
+    to: "{{ apitem.to | default(omit) }}"
+    from: "{{ apitem.from | default(omit) }}"
+    interface: "{{ apitem.interface | default(omit) }}"
+  when: "ap_uwf_status.rc == 0 and 'Status: active' in ap_uwf_status.stdout"
+  loop: "{{ firewall_ports | default([]) }}"
+  loop_control:
+    loop_var: apitem

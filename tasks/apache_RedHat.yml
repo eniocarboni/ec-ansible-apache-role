@@ -1,0 +1,176 @@
+---
+- name: "Check file ssl.conf on /etc/httpd/conf.d/"
+  ansible.builtin.stat:
+    path: "/etc/httpd/conf.d/ssl.conf"
+  register: stat_ssl
+- name: "Check crt /etc/pki/tls/certs/localhost.crt"
+  ansible.builtin.stat:
+    path: "/etc/pki/tls/certs/localhost.crt"
+  register: stat_crt
+- name: "Check openssl package"
+  ansible.builtin.package:
+    name: openssl
+    state: present
+  when: stat_ssl.stat.exists and not stat_crt.stat.exists
+- name: "Check ssl local cert"
+  ansible.builtin.shell: >
+    openssl req -newkey rsa:2048 -nodes -keyout /etc/pki/tls/private/localhost.key -x509 -days 365 -out /etc/pki/tls/certs/localhost.crt -batch
+  register: stat_openssl_newkey
+  changed_when: stat_openssl_newkey.rc == 0
+  when: stat_ssl.stat.exists and not stat_crt.stat.exists
+- name: "Register mpm_module name"
+  ansible.builtin.set_fact:
+    mpm_module: "mpm_{{ apache_mpm }}_module"
+- name: "Check httpd modules"
+  ansible.builtin.shell: >
+    httpd -M
+  register: ap_modules  
+  changed_when: false
+- name: "Disable all mpm LoadModule in 00-mpm.conf"
+  ansible.builtin.replace:
+    path: /etc/httpd/conf.modules.d/00-mpm.conf
+    regexp: '^LoadModule'
+    replace: '#LoadModule'
+  notify: "Restart Web Server"
+  when: not (mpm_module in ap_modules.stdout)
+
+- name: "Enable new mpm LoadModule in 00-mpm.conf {{ apache_mpm }}"
+  ansible.builtin.replace:
+    path: /etc/httpd/conf.modules.d/00-mpm.conf
+    regexp: "^#LoadModule {{ mpm_module }}"
+    replace: "LoadModule {{ mpm_module }}"
+  notify: "Restart Web Server"
+  when: not (mpm_module in ap_modules.stdout)
+
+- name: "Check all active Httpd modules"
+  ansible.builtin.shell: >
+    grep -l 'LoadModule {{ apitem.name | quote }}_module ' /etc/httpd/conf.modules.d/*
+  register: ap_mods_files
+  when: not apitem.name.startswith('mpm_')
+  failed_when: ap_mods_files.rc != 0
+  changed_when: false
+  loop: "{{ apache_modules }}"
+  loop_control:
+    loop_var: apitem
+- name: "Disable Httpd modules"
+  ansible.builtin.lineinfile: 
+    path: "{{ ap_mods_files.results[ap_idx].stdout }}"
+    regexp: "^\\s*LoadModule {{ apitem.name }}_module (.*)$"
+    line: "#LoadModule {{ apitem.name }}_module \\1"
+    backrefs: yes
+  notify: "Restart Web Server"
+  when: apitem.state == 'absent' and (not apitem.name.startswith('mpm_')) and (apitem.name in ap_modules.stdout) and (ap_mods_files.results[ap_idx].rc == 0)
+  loop: "{{ apache_modules }}"
+  loop_control:
+    loop_var: apitem
+    index_var: ap_idx
+- name: "Enable Httpd modules"
+  ansible.builtin.lineinfile: 
+    path: "{{ ap_mods_files.results[ap_idx].stdout }}"
+    regexp: "^\\s*#\\s*LoadModule {{ apitem.name }}_module (.*)$"
+    line: "LoadModule {{ apitem.name }}_module \\1"
+    backrefs: yes
+  notify: "Restart Web Server"
+  when: apitem.state == 'present' and (not apitem.name.startswith('mpm_')) and (apitem.name not in ap_modules.stdout) and (ap_mods_files.results[ap_idx].rc == 0)
+  loop: "{{ apache_modules }}"
+  loop_control:
+    loop_var: apitem
+    index_var: ap_idx
+- name: "Check Apache ports to listen"
+  ansible.builtin.template:
+    src: apache_redhat_ports.j2
+    dest: "/etc/httpd/conf.d/ports.conf"
+    group: root
+    owner: root
+    mode: '0644'   
+  notify: "Restart Web Server"
+- name: "Comment Listen on default httpd.conf file"
+  ansible.builtin.lineinfile:
+    path: "/etc/httpd/conf/httpd.conf"
+    regexp: '^(\s*)Listen (.*)$'
+    line: '#\1Listen \2'
+    backrefs: yes
+  notify: "Restart Web Server"
+- name: "Comment Listen on ssl.conf file"
+  ansible.builtin.lineinfile:
+    path: "/etc/httpd/conf.d/ssl.conf"
+    regexp: '^(\s*)Listen (.*)$'
+    line: '#\1Listen \2'
+    backrefs: yes
+  notify: "Restart Web Server"
+  when: stat_ssl.stat.exists | bool
+
+- name: "Check Apache VirtualHosts"
+  ansible.builtin.template:
+    src: apache_vhost.j2
+    dest: "/etc/httpd/conf.d/090-{{ apitem.ServerName | replace(':', '_') | replace('.', '_') }}{{ apitem.file_suffix | default('') }}.conf"
+    group: root
+    mode: '0644'
+  notify: "Restart Web Server"
+  when: apitem.state == 'present'
+  loop: "{{ apache_virtualhost }}"
+  loop_control:
+    loop_var: apitem
+- name: "Remove Apache VirtualHosts"
+  ansible.builtin.file:
+    dest: "/etc/httpd/conf.d/090-{{ apitem.ServerName | replace(':', '_') | replace('.', '_') }}{{ apitem.file_suffix | default('') }}.conf"
+    state: absent
+  notify: "Restart Web Server"
+  when: apitem.state != 'present'
+  loop: "{{ apache_virtualhost }}"
+  loop_control:
+    loop_var: apitem
+- name: "Remove enabled Apache VirtualHosts"
+  ansible.builtin.file:
+    dest: "/etc/apache2/sites-enabled/090-{{ apitem.ServerName | replace(':', '_') | replace('.', '_') }}{{ apitem.file_suffix | default('') }}.conf"
+    state: absent
+  notify: "Restart Web Server"
+  when: apitem.state != 'present'
+  loop: "{{ apache_virtualhost }}"
+  loop_control:
+    loop_var: apitem
+
+- name: "Check Apache ServerTokens"
+  ansible.builtin.lineinfile:
+    path: "/etc/httpd/conf/httpd.conf"
+    regexp: '^ServerTokens '
+    line: "ServerTokens {{ apache_servertokens | default('Prod') }}"
+  notify: "Restart Web Server"
+
+- name: "Check Apache ServerSignature"
+  ansible.builtin.lineinfile:
+    path: "/etc/httpd/conf/httpd.conf"
+    regexp: '^ServerSignature '
+    line: "ServerSignature {{ apache_serversignature | default('Off') }}"
+  notify: "Restart Web Server"
+
+- name: "Install Firewalld firewall package"
+  ansible.builtin.package: 
+    name: firewalld
+    state: latest # noqa package-latest
+  when: firewall | bool and firewall_force_install | bool
+- name: "Enable Firewalld firewall"
+  ansible.builtin.service: 
+    name: firewalld
+    state: started 
+    enabled: yes
+  when: firewall | bool and firewall_force_install | bool
+- name: "Check Firewalld Firewall"
+  ansible.builtin.command: "systemctl status firewalld"
+  register: ap_firewalld_status
+  when: firewall | bool
+  failed_when: false
+  changed_when: false
+- name: "Open Firewall Firewall port for Apache Server"
+  ansible.posix.firewalld:
+    port: "{{ apitem.port }}/{{ apitem.proto | default('tcp') }}"
+    zone: "{{ apitem.zone | default(omit) }}"
+    interface: "{{ apitem.interface | default(omit) }}"
+    source: "{{ apitem.from | default(omit) }}"
+    immediate: true
+    permanent: true
+    state: enabled
+  when: "ap_firewalld_status.rc == 0 and 'Active: active' in ap_firewalld_status.stdout"
+  loop: "{{ firewall_ports | default([]) }}"
+  loop_control:
+    loop_var: apitem

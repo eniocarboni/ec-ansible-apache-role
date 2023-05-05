@@ -1,0 +1,6 @@
+---
+apache_server: httpd
+apache_service: "{{ apache_server }}"
+apache_log_dir: "logs"
+apache_virtualhost_def_sslcertificatefile: /etc/pki/tls/certs/localhost.crt
+apache_virtualhost_def_sslcertificatekeyfile: /etc/pki/tls/private/localhost.key

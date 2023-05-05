@@ -1,0 +1,6 @@
+---
+# handlers file for eniocarboni.apache
+- name: "Restart Web Server"
+  ansible.builtin.service:
+    name: "{{ apache_service }}"
+    state: restarted
