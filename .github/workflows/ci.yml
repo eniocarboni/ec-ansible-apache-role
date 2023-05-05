@@ -26,6 +26,8 @@ jobs:
           python-version: '3.x'
       - name: Install ansible, molecule and dependences
         run: pip3 install ansible molecule[docker] docker yamllint ansible-lint
+      - name: Run Molecule reset (remove temp files)
+        run: molecule reset
       - name: Run Molecule tests
         run: molecule test
         env:
