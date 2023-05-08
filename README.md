@@ -216,8 +216,6 @@ ansible-galaxy install eniocarboni.apache
           state: present
         - name: ssl
           state: present
-      mysql_type: mariadb
-      mysql_root_password: "My secure password: unset for use random password"
 ```
 
 ### Example 3: virtualhost
